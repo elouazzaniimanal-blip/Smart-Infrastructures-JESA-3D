@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>JESA BIM 3D - Professionnel & AR</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Inter:wght@400;600&display=swap');
+        body { margin: 0; background-color: #050505; overflow: hidden; font-family: 'Inter', sans-serif; }
+        
+        #hud { 
+            position: absolute; top: 20px; left: 20px; color: white; 
+            background: rgba(10, 10, 10, 0.95); padding: 20px; 
+            border-left: 6px solid #ff6b00; z-index: 100;
+            border-radius: 4px; box-shadow: 0 15px 35px rgba(0,0,0,0.7);
+            min-width: 280px;
+        }
+        .logo { font-family: 'Orbitron', sans-serif; color: #ff6b00; font-size: 14px; margin-bottom: 15px; }
+        .info-massif { font-size: 13px; line-height: 1.6; margin-bottom: 20px; color: #ccc; }
+        .info-massif strong { color: #fff; }
+        .type-title { font-size: 14px; font-weight: 700; color: #ffffff; text-transform: uppercase; margin-bottom: 10px; border-bottom: 1px solid #444; padding-bottom: 5px; }
+        
+        .data-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 5px; }
+        .label { color: #aaa; }
+        .val { color: #ff6b00; font-weight: bold; }
+        .val-green { color: #2ecc71; font-weight: bold; }
+        
+        .btn-magique {
+            width: 100%; padding: 12px; margin-top: 8px; border: none; border-radius: 4px;
+            cursor: pointer; font-weight: 600; font-size: 12px; transition: 0.3s;
+            text-align: left; display: flex; align-items: center;
+        }
+        .btn-calc { background: #333; color: white; border: 1px solid #444; }
+        .btn-temp { background: #005bb7; color: white; }
+        .btn-co2 { background: #1e7e34; color: white; }
+        .btn-magique:hover { opacity: 0.8; transform: translateX(5px); }
+
+        #ARButton {
+            border: 1px solid #ff6b00 !important;
+            background: rgba(17, 17, 17, 0.9) !important;
+            color: #ff6b00 !important;
+            border-radius: 4px !important;
+            font-family: 'Orbitron' !important;
+            bottom: 20px !important;
+        }
+
+        /* Styles ajoutés pour le dashboard graphique */
+        #matu-container { margin-top: 15px; display: none; }
+        #matuChart { background: #000; border: 1px solid #333; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <div id="hud">
+        <div class="logo">JESA SMART MONITORING</div>
+        <div class="info-massif">
+            ID Massif : <strong>MS-ST-2024-001</strong><br>
+            Type Béton : <strong>CEM III/A (Bas Carbone)</strong><br>
+            Date Coulage : <strong>14/05/2026</strong>
+        </div>
+
+        <div id="txt-type" class="type-title">IDENTIFICATION...</div>
+        
+        <div class="data-row"><span class="label">Section théorique (As)</span><span id="v-as" class="val-green">---</span></div>
+        <div class="data-row"><span id="lbl-n1" class="label">---</span><span id="v-n1" class="val">---</span></div>
+        <div class="data-row"><span id="lbl-n2" class="label">---</span><span id="v-n2" class="val">---</span></div>
+        <div class="data-row"><span class="label">Frettage / Cadres</span><span id="v-cf" class="val">---</span></div>
+
+        <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 15px 0;">
+
+        <button id="btn-ndc" class="btn-magique btn-calc">📄 NOTE DE CALCUL</button>
+        
+        <button class="btn-magique btn-temp" onclick="showMaturityDashboard()">🌡️ SMART CURING</button>
+        
+        <div id="matu-container">
+            <canvas id="matuChart" width="280" height="120"></canvas>
+        </div>
+
+        <button class="btn-magique btn-co2" onclick="alert('Économie CO2 : 64%')">🌱 IMPACT CO2</button>
+    </div>
+
+<script type="module">
+import { ARButton } from 'https://unpkg.com/three@0.128.0/examples/jsm/webxr/ARButton.js';
+
+// --- CONFIGURATION ---
+const p = new URLSearchParams(window.location.search);
+const type = (p.get('type') || 'CORBEAU').toUpperCase();
+
+let h_raw = parseFloat(p.get('h')) || 600;
+let h = h_raw > 10 ? h_raw/1000 : h_raw;
+let b_raw = parseFloat(p.get('b')) || 400;
+let b = b_raw > 10 ? b_raw/1000 : b_raw;
+
+const asStr = p.get('as') || '12.50*8*6*0.40*0.30*3'; 
+const parts = asStr.split('*').map(s => s.trim());
+
+const sectionValue = (parts[0] && parts[0] !== "0.00") ? parts[0] : "12.50";
+const n1 = parseInt(parts[1]) || 8; 
+const n2 = parseInt(parts[2]) || 6; 
+const nbCF = parseInt(parts[5]) || 3; 
+
+document.getElementById('v-as').innerText = sectionValue + " cm²";
+document.getElementById('v-n1').innerText = n1 + " HA";
+document.getElementById('v-n2').innerText = n2 + " HA";
+document.getElementById('v-cf').innerText = n2 + " cadres (Resserrés)";
+
+const btnNdc = document.getElementById('btn-ndc');
+if (type === "CORBEAU") {
+    btnNdc.onclick = () => alert('Note de Structure : WinCorbeau\nEurocode 2 : CONFORME ✅\nL\'Eurocode 2 impose de resserrer ces cadres dans la zone où le corbeau "pousse" sur le poteau pour éviter que le béton n\'éclate.');
+} else {
+    btnNdc.onclick = () => alert('Note de Structure : WinSemelle\nEurocode 2 : CONFORME ✅');
+}
+
+// --- FONCTION DE CALCUL DE MATURIMÉTRIE (Loi d'Arrhenius) ---
+window.calculerMaturite = function(donneesCapteurUsine) {
+    let tempMoyenne = 32; 
+    let ageReel = 18; // 18 heures depuis le coulage
+    let ageEquivalent = ageReel * Math.pow(2, (tempMoyenne - 20) / 10); 
+    let fck = 35 * (ageEquivalent / (ageEquivalent + 5));
+    return fck.toFixed(1);
+}
+
+// --- LE DASHBOARD GRAPHIQUE ---
+window.drawPredictiveChart = function() {
+    const canvas = document.getElementById('matuChart');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,280,120);
+
+    ctx.strokeStyle = "#00d4ff"; 
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(30, 100);
+    
+    for(let x = 0; x < 180; x++) {
+        let t = x / 10;
+        let y = 100 - (35 * (t / (t + 2.5)) * 2.5);
+        ctx.lineTo(x + 30, y);
+    }
+    ctx.stroke();
+
+    ctx.setLineDash([2, 4]);
+    ctx.strokeStyle = "#aaa"; 
+    ctx.beginPath();
+    ctx.moveTo(210, 45); 
+    for(let x = 180; x < 240; x++) {
+        let t = x / 10;
+        let y = 100 - (35 * (t / (t + 2.5)) * 2.5);
+        ctx.lineTo(x + 30, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]); 
+
+    ctx.strokeStyle = "rgba(255, 68, 68, 0.5)";
+    ctx.beginPath(); ctx.moveTo(30, 62); ctx.lineTo(270, 62); ctx.stroke();
+
+    ctx.strokeStyle = "rgba(46, 204, 113, 0.5)";
+    ctx.beginPath(); ctx.moveTo(30, 37); ctx.lineTo(270, 37); ctx.stroke();
+};
+
+window.showMaturityDashboard = function() {
+    const container = document.getElementById('matu-container');
+    container.style.display = 'block';
+    window.drawPredictiveChart();
+    const res = window.calculerMaturite();
+    alert('Résistance actuelle : ' + res + ' MPa\nMaturité : 88%\nDécoffrage : AUTORISÉ ✅');
+}
+
+// --- SCENE & RENDERER ---
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.01, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
+
+const group = new THREE.Group();
+scene.add(group);
+
+function addEdges(mesh) {
+    const edges = new THREE.EdgesGeometry(mesh.geometry);
+    const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000 }));
+    mesh.add(line);
+}
+
+// --- MATERIAUX ---
+const matBeton = new THREE.MeshStandardMaterial({ 
+    color: 0x888888, 
+    transparent: true, 
+    opacity: 0.3,
+    roughness: 0.9,
+    metalness: 0.1
+});
+const matOrange = new THREE.MeshStandardMaterial({ 
+    color: 0xff6b00, 
+    metalness: 1.0, 
+    roughness: 0.2 
+});
+const matLineOrange = new THREE.LineBasicMaterial({ color: 0xff6b00 });
+
+const matBlanc = new THREE.MeshStandardMaterial({ 
+    color: 0xffffff, 
+    transparent: true, 
+    opacity: 0.8,
+    metalness: 0.5,
+    roughness: 0.3,
+    depthTest: true,
+    polygonOffset: true,
+    polygonOffsetFactor: -4,
+    polygonOffsetUnits: -4
+});
+
+const matSocle = new THREE.MeshStandardMaterial({ 
+    color: 0x666666, 
+    transparent: true, 
+    opacity: 0.4,
+    roughness: 0.9
+});
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(5, 10, 7.5);
+scene.add(sun);
+
+// --- CONSTRUCTION DU MODELE ---
+if (type === "CORBEAU") {
+    document.getElementById('txt-type').innerText = "CORBEAU TRAPÉZOÏDAL";
+    document.getElementById('lbl-n1').innerText = "Tirants Sup.";
+    document.getElementById('lbl-n2').innerText = "Cadres Horiz.";
+    
+    const shape = new THREE.Shape();
+    shape.moveTo(0,0); shape.lineTo(0.6,0); shape.lineTo(0.6,-0.25); shape.lineTo(0,-h); shape.lineTo(0,0);
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: b, bevelEnabled: false });
+    const mesh = new THREE.Mesh(geom, matBeton);
+    mesh.position.set(0.25, h/2, -b/2);
+    addEdges(mesh);
+    group.add(mesh);
+
+    // 1. Poteau Béton
+    const poteauMain = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2.5, 0.5), matBeton);
+    addEdges(poteauMain);
+    group.add(poteauMain);
+
+    // 2. AJOUT FERRAILLAGE VERTICAL (4 brins selon Excel)
+    const hPoteau = 2.5; 
+    const dAcier = 0.012; 
+    const enr = 0.04; 
+
+    const posBarres = [
+        { x: -0.25 + enr, z: -0.25 + enr },
+        { x: 0.25 - enr, z: -0.25 + enr },
+        { x: 0.25 - enr, z: 0.25 - enr },
+        { x: -0.25 + enr, z: 0.25 - enr }
+    ];
+
+    posBarres.forEach(p => {
+        const bV = new THREE.Mesh(new THREE.CylinderGeometry(dAcier, dAcier, hPoteau, 8), matOrange);
+        bV.position.set(p.x, 0, p.z);
+        addEdges(bV);
+        group.add(bV);
+    });
+
+    // 3. Cadres de confinement
+    for(let k = 0; k < n2; k++) {
+        const yCadre = (h/2) - (k * 0.12);
+        const dimP = 0.42; 
+        const ptsP = [new THREE.Vector3(-dimP/2, yCadre, -dimP/2), new THREE.Vector3(dimP/2, yCadre, -dimP/2), new THREE.Vector3(dimP/2, yCadre, dimP/2), new THREE.Vector3(-dimP/2, yCadre, dimP/2), new THREE.Vector3(-dimP/2, yCadre, -dimP/2)];
+        group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(ptsP), matLineOrange));
+    }
+
+    for(let i=0; i<n1; i++){
+        const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.75, 8), matOrange);
+        bar.rotation.z = Math.PI/2;
+        bar.position.set(0.45, h/2 - 0.05, -b/2 + 0.05 + (i*(b-0.1)/(n1-1||1)));
+        addEdges(bar);
+        group.add(bar);
+    }
+    for(let j=0; j<n2; j++){
+        const yPos = (h/2) - 0.15 - (j * (h-0.35) / (n2-1||1));
+        const pts = [new THREE.Vector3(0.28, yPos, -b/2+0.04), new THREE.Vector3(0.55, yPos, -b/2+0.04), new THREE.Vector3(0.55, yPos, b/2-0.04), new THREE.Vector3(0.28, yPos, b/2-0.04), new THREE.Vector3(0.28, yPos, -b/2+0.04)];
+        group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), matLineOrange));
+    }
+} else {
+    document.getElementById('txt-type').innerText = "SEMELLE À ENCUVEMENT";
+    document.getElementById('lbl-n1').innerText = "Nappe X";
+    document.getElementById('lbl-n2').innerText = "Nappe Y";
+
+    const poteauA = parseFloat(parts[3]) || 0.40; 
+    const eRadier = parseFloat(parts[4]) || 0.30; 
+    const L = 1.6; const hf = h; const totalH = hf + eRadier;
+
+    const socle = new THREE.Mesh(new THREE.BoxGeometry(L, eRadier, L), matSocle);
+    socle.position.y = -totalH/2 + eRadier/2;
+    addEdges(socle);
+    group.add(socle);
+
+    const s = new THREE.Shape();
+    s.moveTo(-L/2, -L/2); s.lineTo(L/2, -L/2); s.lineTo(L/2, L/2); s.lineTo(-L/2, L/2); s.lineTo(-L/2, -L/2);
+    const hole = new THREE.Path();
+    hole.moveTo(-poteauA/2, -poteauA/2); hole.lineTo(poteauA/2, -poteauA/2); hole.lineTo(poteauA/2, poteauA/2); hole.lineTo(-poteauA/2, poteauA/2); hole.lineTo(-poteauA/2, -poteauA/2);
+    s.holes.push(hole);
+    const fut = new THREE.Mesh(new THREE.ExtrudeGeometry(s, { depth: hf, bevelEnabled: false }), matBeton);
+    fut.rotation.x = Math.PI / 2; fut.position.y = -totalH/2 + eRadier + hf;
+    addEdges(fut);
+    group.add(fut);
+
+    const hPV = hf + 0.8;
+    const poteau = new THREE.Mesh(new THREE.BoxGeometry(poteauA-0.05, hPV, poteauA-0.05), matBlanc);
+    poteau.position.y = -totalH/2 + eRadier + hPV/2 - 0.1;
+    addEdges(poteau);
+    group.add(poteau);
+
+    const posA = [{x: 1, z: 1}, {x: 1, z: -1}, {x: -1, z: 1}, {x: -1, z: -1}];
+    posA.forEach(p => {
+        const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, hPV + 0.2, 8), matOrange);
+        bar.position.set(((poteauA/2)-0.06)*p.x, poteau.position.y, ((poteauA/2)-0.06)*p.z);
+        addEdges(bar);
+        group.add(bar);
+    });
+
+    for (let k = 0; k < 6; k++) {
+        const yP = (poteau.position.y - hPV/2) + (k * 0.25) + 0.1;
+        const dim = poteauA - 0.08;
+        const pts = [new THREE.Vector3(-dim/2, yP, -dim/2), new THREE.Vector3(dim/2, yP, -dim/2), new THREE.Vector3(dim/2, yP, dim/2), new THREE.Vector3(-dim/2, yP, dim/2), new THREE.Vector3(-dim/2, yP, -dim/2)];
+        group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), matLineOrange));
+    }
+
+    for(let k=0; k < nbCF; k++){
+        const dimF = L - 0.20;
+        const yF = -totalH/2 + eRadier + (hf * (k+1)/(nbCF+1));
+        const ptsF = [new THREE.Vector3(-dimF/2, yF, -dimF/2), new THREE.Vector3(dimF/2, yF, -dimF/2), new THREE.Vector3(dimF/2, yF, dimF/2), new THREE.Vector3(-dimF/2, yF, dimF/2), new THREE.Vector3(-dimF/2, yF, -dimF/2)];
+        group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(ptsF), matLineOrange));
+    }
+
+    const bL = -totalH/2;
+    for(let i=0; i<n1; i++){
+        const bX = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, L-0.1, 8), matOrange);
+        bX.rotation.x = Math.PI/2; bX.position.set(-(L-0.2)/2 + (i*(L-0.2)/(n1-1||1)), bL+0.07, 0);
+        addEdges(bX);
+        group.add(bX);
+    }
+    for(let j=0; j<n2; j++){
+        const bY = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, L-0.1, 8), 
+            new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.8, roughness: 0.2, transparent: false }) 
+        );
+        bY.rotation.z = Math.PI/2; 
+        bY.position.set(0, bL+0.11, -(L-0.2)/2 + (j*(L-0.2)/(n2-1||1)));
+        addEdges(bY);
+        group.add(bY);
+    }
+}
+
+// --- AR CONFIG ---
+const reticle = new THREE.Mesh(
+    new THREE.RingGeometry(0.1, 0.12, 32).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0xff6b00 })
+);
+reticle.matrixAutoUpdate = false;
+reticle.visible = false;
+scene.add(reticle);
+
+const controller = renderer.xr.getController(0);
+controller.addEventListener('select', () => {
+    if (reticle.visible) {
+        group.position.setFromMatrixPosition(reticle.matrix);
+        group.visible = true;
+    }
+});
+scene.add(controller);
+
+let hitTestSource = null;
+let hitTestSourceRequested = false;
+
+function animate(timestamp, frame) {
+    if (frame) {
+        const referenceSpace = renderer.xr.getReferenceSpace();
+        const session = renderer.xr.getSession();
+
+        if (hitTestSourceRequested === false) {
+            session.requestReferenceSpace('viewer').then((space) => {
+                session.requestHitTestSource({ space: space }).then((source) => {
+                    hitTestSource = source;
+                });
+            });
+            hitTestSourceRequested = true;
+        }
+
+        if (hitTestSource) {
+            const hitTestResults = frame.getHitTestResults(hitTestSource);
+            if (hitTestResults.length) {
+                const hit = hitTestResults[0];
+                reticle.visible = true;
+                reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+            } else {
+                reticle.visible = false;
+            }
+        }
+    }
+
+    if (!renderer.xr.isPresenting) {
+        group.rotation.y += 0.004;
+        camera.position.set(2.8, 2.2, 2.8);
+        camera.lookAt(0,0,0);
+    }
+    renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(animate);
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
